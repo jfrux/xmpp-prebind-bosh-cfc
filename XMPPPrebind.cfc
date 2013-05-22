@@ -71,25 +71,26 @@ component displayname="XMPPPrebind" accessors="true" {
     this.password = $password;
 
     $response = this.sendInitialConnection();
+    
     $documentObj = XmlParse($response);
     this.sid = $documentObj.XmlRoot.XmlAttributes['sid'];
     this.debug(this.sid, 'sid');
-
-    $mechanisms = $documentObj.XmlChildren[1].XmlChildren[1].XmlChildren[1];
-    for ($value in $mechanisms.XmlChildren) {
-      this.mechanisms.add($value.XmlText);
-    }
-    if (arrayFindNoCase(this.mechanisms,this.getENCRYPTION_DIGEST_MD5())) {
-      this.encryption = "ENCRYPTION_DIGEST_MD5";
-    } elseif (arrayFindNoCase(this.mechanisms,this.getENCRYPTION_CRAM_MD5())) {
-      this.encryption = "ENCRYPTION_CRAM_MD5";
-    } elseif (arrayFindNoCase(this.mechanisms,this.getENCRYPTION_PLAIN())) {
-      this.encryption = "ENCRYPTION_PLAIN";
-    } else {
-      throw "No encryption supported by the server is supported by this library.";
-    }
-
-    this.debug(this.encryption, 'encryption used');
+    //writeDump(var=$documentObj,abort=true);
+    // $mechanisms = $documentObj.XmlChildren[1].XmlChildren[1].XmlChildren[1];
+    // for ($value in $mechanisms.XmlChildren) {
+    //   this.mechanisms.add($value.XmlText);
+    // }
+    // if (arrayFindNoCase(this.mechanisms,this.getENCRYPTION_DIGEST_MD5())) {
+    //   this.encryption = "ENCRYPTION_DIGEST_MD5";
+    // } elseif (arrayFindNoCase(this.mechanisms,this.getENCRYPTION_CRAM_MD5())) {
+    //   this.encryption = "ENCRYPTION_CRAM_MD5";
+    // } elseif (arrayFindNoCase(this.mechanisms,this.getENCRYPTION_PLAIN())) {
+    //   this.encryption = "ENCRYPTION_PLAIN";
+    // } else {
+    //   throw "No encryption supported by the server is supported by this library.";
+    // }
+    this.encryption = "ENCRYPTION_PLAIN";
+    //this.debug(this.encryption, 'encryption used');
   }
 
   /**
@@ -100,21 +101,23 @@ component displayname="XMPPPrebind" accessors="true" {
    */
   public function auth() {
     //TODO: NEEDS SASL IMPLEMENTATION (most likely JAVA based);
-    $auth = createObject("java","java.sasl");
-
-    switch (this.encryption) {
-      case ENCRYPTION_PLAIN:
-        $authXml = this.buildPlainAuth($auth);
-        break;
-      case ENCRYPTION_DIGEST_MD5:
-        $authXml = this.sendChallengeAndBuildDigestMd5Auth($auth);
-        break;
-      case ENCRYPTION_CRAM_MD5:
-        $authXml = this.sendChallengeAndBuildCramMd5Auth($auth);
-        break;
-    }
+    $auth = createObject("component","lib.auth_sasl.plain");
+    $authXml = this.buildPlainAuth($auth);
+    
+    // switch (this.encryption) {
+    //   case ENCRYPTION_PLAIN:
+        
+    //     break;
+    //   case ENCRYPTION_DIGEST_MD5:
+    //     $authXml = this.sendChallengeAndBuildDigestMd5Auth($auth);
+    //     break;
+    //   case ENCRYPTION_CRAM_MD5:
+    //     $authXml = this.sendChallengeAndBuildCramMd5Auth($auth);
+    //     break;
+    // }
     $response = this.send($authXml);
-
+    writeDump(var=$response,abort=true);
+    flush();
     $body = getBodyFromXml($response);
 
     if (!$body.hasChildNodes() || $body.firstChild.nodeName NEQ 'success') {
@@ -232,17 +235,11 @@ component displayname="XMPPPrebind" accessors="true" {
     $body = $domDocument.body;
 
     $waitTime = 60;
-    $keyCount = structCount($domDocument.body);
-    $domDocument.body.XmlChildren[$keyCount+1] = XmlElemNew($domDocument,'hold');
-    $domDocument.body.XmlChildren[$keyCount+1].XmlText = "1";
-    $domDocument.body.XmlChildren[$keyCount+2] = XmlElemNew($domDocument,'to');
-    $domDocument.body.XmlChildren[$keyCount+2].XmlText = this.jabberHost;
-    $domDocument.body.XmlChildren[$keyCount+3] = XmlElemNew($domDocument,"xmlns:xmpp");
-    $domDocument.body.XmlChildren[$keyCount+3].XmlText = this.getXMLNS_BOSH();
-    $domDocument.body.XmlChildren[$keyCount+4] = XmlElemNew($domDocument,'xmpp:version');
-    $domDocument.body.XmlChildren[$keyCount+4].XmlText =  '1.0';
-    $domDocument.body.XmlChildren[$keyCount+5] = XmlElemNew($domDocument,'wait');
-    $domDocument.body.XmlChildren[$keyCount+5].XmlText =  $waitTime;
+    $domDocument.XmlRoot.XmlAttributes['hold'] = "1";
+    $domDocument.XmlRoot.XmlAttributes['to'] = this.jabberHost;
+    $domDocument.XmlRoot.XmlAttributes['xmlns:xmpp'] = this.getXMLNS_BOSH();
+    //$domDocument.XmlRoot.XmlAttributes['xmpp:version'] = '1.0';
+    $domDocument.XmlRoot.XmlAttributes['wait'] = $waitTime;
 
     return this.send(ToString($domDocument));
   }
@@ -254,17 +251,16 @@ component displayname="XMPPPrebind" accessors="true" {
    */
   private function sendChallenge() {
     $domDocument = this.buildBody();
-    $body = getBodyFromDomDocument($domDocument);
+    $body = $domDocument.XmlRoot;
 
-    $auth = $domDocument.createElement('auth');
-    $auth.appendChild(getNewTextAttribute($domDocument, 'xmlns', XMLNS_SASL));
-    $auth.appendChild(getNewTextAttribute($domDocument, 'mechanism', this.encryption));
-    $body.appendChild($auth);
+    $auth = $body.XmlChildren['auth'] = XmlElemNew($domDocument,'auth');
+    $auth.XmlAttributes['xmlns'] = this.getXMLNS_SASL();
+    $auth.XmlAttributes['mechanism'] = this.encryption;
+    
+    $response = this.send(ToString($domDocument));
 
-    $response = this.send($domDocument.saveXML());
-
-    $body = this.getBodyFromXml($response);
-    $challenge = base64_decode($body.firstChild.nodeValue);
+    $body = XmlParse($response).XmlRoot;
+    $challenge = ToString(ToBinary($body.XmlChildren[1].XmlText));
 
     return $challenge;
   }
@@ -275,21 +271,20 @@ component displayname="XMPPPrebind" accessors="true" {
    * @param Auth_SASL_Common $auth
    * @return string Auth XML to send
    */
-  private function buildPlainAuth(Auth_SASL_Common $auth) {
+  private function buildPlainAuth(lib.auth_sasl.plain $auth) {
     $authString = $auth.getResponse(getNodeFromJid(this.jid), this.password, getBareJidFromJid(this.jid));
-    $authString = base64_encode($authString);
+    $authString = toBase64($authString);
     this.debug($authString, 'PLAIN Auth String');
 
     $domDocument = this.buildBody();
-    $body = getBodyFromDomDocument($domDocument);
+    $body = $domDocument.XmlRoot;
 
-    $auth = $domDocument.createElement('auth');
-    $auth.appendChild(getNewTextAttribute($domDocument, 'xmlns', XMLNS_SASL));
-    $auth.appendChild(getNewTextAttribute($domDocument, 'mechanism', this.encryption));
-    $auth.appendChild($domDocument.createTextNode($authString));
-    $body.appendChild($auth);
-
-    return $domDocument.saveXML();
+    $auth = $body['auth'] = XmlElemNew($domDocument,'auth');
+    $auth.XmlAttributes['xmlns'] = this.getXMLNS_SASL();
+    $auth.XmlAttributes['mechanism'] = this.encryption;
+    $auth.XmlText = $authString;
+    
+    return ToString($domDocument);
   }
 
   /**
@@ -304,7 +299,7 @@ component displayname="XMPPPrebind" accessors="true" {
     $authString = $auth.getResponse(getNodeFromJid(this.jid), this.password, $challenge, this.jabberHost, SERVICE_NAME, this.jid);
     this.debug($authString, 'DIGEST-MD5 Auth String');
 
-    $authString = base64_encode($authString);
+    $authString = toBase64($authString);
 
     $domDocument = this.buildBody();
     $body = getBodyFromDomDocument($domDocument);
@@ -333,7 +328,7 @@ component displayname="XMPPPrebind" accessors="true" {
     $authString = $auth.getResponse(getNodeFromJid(this.jid), this.password, $challenge);
     this.debug($authString, 'CRAM-MD5 Auth String');
 
-    $authString = base64_encode($authString);
+    $authString = toBase64($authString);
 
     $domDocument = this.buildBody();
     $body = getBodyFromDomDocument($domDocument);
@@ -451,7 +446,7 @@ component displayname="XMPPPrebind" accessors="true" {
    * @param string $jid Jid in form username@jabberHost/Resource
    * @return string JID
    */
-  public static function getBareJidFromJid($jid) {
+  public function getBareJidFromJid($jid) {
     if ($jid == '') {
       return '';
     }
@@ -465,7 +460,7 @@ component displayname="XMPPPrebind" accessors="true" {
    * @param string $jid
    * @return string Node
    */
-  public static function getNodeFromJid($jid) {
+  public function getNodeFromJid($jid) {
     var $node = listFirst(arguments.$jid,'@');
     return $node;
   }
@@ -478,9 +473,8 @@ component displayname="XMPPPrebind" accessors="true" {
    * @param string $value
    * @return DOMNode
    */
-  private static function getNewTextAttribute($domDocument, $attributeName, $value) {
+  private function getNewTextAttribute($domDocument, $attributeName, $value) {
     var $attribute = arguments.$domDocument.XmlRoot.XmlAttributes[arguments.$attributeName];
-    $attribute.XmlText($value);
 
     return $attribute;
   }
